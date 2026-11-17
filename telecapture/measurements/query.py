@@ -22,6 +22,7 @@ class MeasurementView:
     value_micro: object
     quality: str
     body: bytes
+    unordered: bool = False
 
     def as_dict(self):
         result = asdict(self)
@@ -38,6 +39,14 @@ def validate_filters(gateway_id=None, stream_id=None, start_us=None, end_us=None
             raise ArchiveError('query', 'time bounds must be integers')
     if start_us is not None and end_us is not None and start_us > end_us:
         raise ArchiveError('query', 'reversed time range')
+
+def key_unordered(key):
+    parts = json.loads(key)
+    if isinstance(parts, list) and len(parts) == 5:
+        return False
+    if isinstance(parts, list) and len(parts) == 6 and parts[4] == 'unordered':
+        return True
+    raise ValueError('delivery key outside supported namespaces')
 
 def verified_messages(connection):
     from telecapture.measurements.codec import decode_message, storage_row
@@ -59,12 +68,20 @@ def verified_messages(connection):
         key, registration, recording, gateway, session, stream, logical, raw, body, digest, provenance = record
         try:
             logical = int(logical)
+            unordered = key_unordered(key)
             header = headers[registration]
             if (recording, gateway, session) != (header.recording_id, header.gateway_id, header.session_id):
                 raise ValueError('message/header identity mismatch')
-            if stream not in dict(header.streams) or raw != logical % 2**32:
+            streams = dict(header.streams)
+            if stream not in streams or raw != logical % 2**32:
                 raise ValueError('message serial identity mismatch')
-            if key != make_delivery_key(recording, gateway, session, stream, logical):
+            if unordered:
+                initial = dict(header.unordered_streams).get(stream, 0)
+            else:
+                initial = streams[stream]
+            if logical < initial:
+                raise ValueError('message identity below mode initial')
+            if key != make_delivery_key(recording, gateway, session, stream, logical, unordered):
                 raise ValueError('delivery identity mismatch')
             if type(body) is not bytes or sha256(body).hexdigest() != digest:
                 raise ValueError('message digest mismatch')
@@ -80,13 +97,14 @@ def verified_messages(connection):
                 raise ValueError('measurement/evidence mismatch')
         except (ValueError, TypeError, KeyError) as exc:
             raise ArchiveError('schema', f'corrupt archive evidence: {exc}') from exc
-        result.append((key, recording, gateway, session, stream, logical, raw, body, source, decoded.measurements))
+        result.append((key, recording, gateway, session, stream, unordered, logical, raw,
+                       body, source, decoded.measurements))
     return result
 
 def read(connection, gateway_id=None, stream_id=None, start_us=None, end_us=None):
     validate_filters(gateway_id, stream_id, start_us, end_us)
     rows = []
-    for key, recording, gateway, session, stream, logical, raw, body, source, measurements in verified_messages(connection):
+    for key, recording, gateway, session, stream, unordered, logical, raw, body, source, measurements in verified_messages(connection):
         if gateway_id is not None and gateway_id != gateway:
             continue
         if stream_id is not None and stream_id != stream:
@@ -98,6 +116,6 @@ def read(connection, gateway_id=None, stream_id=None, start_us=None, end_us=None
                 continue
             rows.append(MeasurementView(key, recording, gateway, session, stream, logical, raw,
                         item.row_number, item.sensor_id, item.time_us, item.quantity, item.unit,
-                        item.value_micro, item.quality, body))
+                        item.value_micro, item.quality, body, unordered))
     return sorted(rows, key=lambda r: (r.time_us, r.gateway_id, r.session_id, r.stream_id,
-                                       r.logical_mid, r.row_number, r.recording_id))
+                                       r.unordered, r.logical_mid, r.row_number, r.recording_id))

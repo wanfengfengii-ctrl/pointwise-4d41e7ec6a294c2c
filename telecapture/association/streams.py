@@ -5,10 +5,12 @@ from telecapture.association.context import AssociationError
 class StreamConfig:
     stream_id: int
     initial_mid: int
+    initial_unordered_mid: int = 0
 
 class StreamCatalog:
     def __init__(self, context):
-        self.configs = {s: StreamConfig(s, m) for s, m in context.streams}
+        unordered = context.unordered_initial_map
+        self.configs = {s: StreamConfig(s, m, unordered[s]) for s, m in context.streams}
 
     def require_stream(self, stream_id, location=None):
         if stream_id not in self.configs:

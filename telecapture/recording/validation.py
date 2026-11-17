@@ -2,11 +2,11 @@ import base64
 import binascii
 from telecapture.recording.provenance import RecordingError
 
-def require_fields(value, required, location=None):
+def require_fields(value, required, location=None, optional=()):
     if not isinstance(value, dict):
         raise RecordingError('expected JSON object', location)
     missing = set(required) - value.keys()
-    extra = value.keys() - set(required)
+    extra = value.keys() - set(required) - set(optional)
     if missing or extra:
         raise RecordingError(f'fields missing={sorted(missing)} unknown={sorted(extra)}', location)
     return value

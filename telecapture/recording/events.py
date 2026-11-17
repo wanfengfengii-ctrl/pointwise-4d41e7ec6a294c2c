@@ -14,6 +14,7 @@ class IDataEvent:
     end: bool
     payload: bytes
     evidence: EventEvidence = field(default_factory=EventEvidence, compare=False)
+    unordered: bool = False
 
     def __post_init__(self):
         loc = self.evidence.location
@@ -24,6 +25,7 @@ class IDataEvent:
         require_integer(self.fsn, 'fsn', loc, 0)
         require_boolean(self.begin, 'begin', loc)
         require_boolean(self.end, 'end', loc)
+        require_boolean(self.unordered, 'unordered', loc)
         if type(self.payload) is not bytes:
             raise RecordingError('payload must be immutable bytes', loc)
 
@@ -31,10 +33,12 @@ class IDataEvent:
 class ForwardEntry:
     stream_id: int
     mid: int
+    unordered: bool = False
 
     def __post_init__(self):
         require_integer(self.stream_id, 'stream_id', minimum=0, maximum=65535)
         uint32(self.mid, 'mid')
+        require_boolean(self.unordered, 'unordered')
 
 @dataclass(frozen=True)
 class ForwardEvent:
@@ -49,7 +53,7 @@ class ForwardEvent:
         if type(self.entries) is not tuple or any(not isinstance(x, ForwardEntry) for x in self.entries):
             raise RecordingError('entries must be a tuple of ForwardEntry', self.evidence.location)
 
-def decode_event(value, evidence=None):
+def decode_event(value, evidence=None, mixed=False):
     evidence = evidence or EventEvidence()
     loc = evidence.location
     if not isinstance(value, dict):
@@ -57,19 +61,28 @@ def decode_event(value, evidence=None):
     kind = value.get('type')
     if kind == 'I-DATA':
         require_fields(value, ('type', 'session_id', 'tsn', 'stream_id', 'mid',
-                               'fsn', 'begin', 'end', 'payload_b64'), loc)
+                               'fsn', 'begin', 'end', 'payload_b64'), loc,
+                       optional=('unordered',) if mixed else ())
+        unordered = False
+        if mixed:
+            unordered = require_boolean(value.get('unordered', False), 'unordered', loc)
         return IDataEvent(value['session_id'], value['tsn'], value['stream_id'],
                           value['mid'], value['fsn'], value['begin'], value['end'],
-                          decode_payload(value['payload_b64'], loc), evidence)
+                          decode_payload(value['payload_b64'], loc), evidence,
+                          unordered=unordered)
     if kind == 'I-FORWARD-TSN':
         require_fields(value, ('type', 'session_id', 'cumulative_tsn', 'entries'), loc)
         if not isinstance(value['entries'], list):
             raise RecordingError('entries must be an array', loc)
         entries = []
         for item in value['entries']:
-            require_fields(item, ('stream_id', 'mid'), loc)
+            require_fields(item, ('stream_id', 'mid'), loc,
+                           optional=('unordered',) if mixed else ())
             stream = require_integer(item['stream_id'], 'stream_id', loc, 0, 65535)
             mid = uint32(item['mid'], 'mid', loc)
-            entries.append(ForwardEntry(stream, mid))
+            unordered = False
+            if mixed:
+                unordered = require_boolean(item.get('unordered', False), 'unordered', loc)
+            entries.append(ForwardEntry(stream, mid, unordered))
         return ForwardEvent(value['session_id'], value['cumulative_tsn'], tuple(entries), evidence)
     raise RecordingError('unsupported event type (ordered I-DATA only)', loc)

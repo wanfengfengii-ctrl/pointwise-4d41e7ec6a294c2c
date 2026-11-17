@@ -14,8 +14,11 @@ class CaptureState:
 
     @classmethod
     def initial(cls, context):
+        starts = {(stream, False): mid for stream, mid in context.streams}
+        starts.update({(stream, True): mid
+                       for stream, mid in context.unordered_initial_map.items()})
         return cls(ReceiptLedger.initial(context.initial_cumulative_tsn), MessageStore(),
-                   AbandonmentIndex(dict(context.streams)), DeliveryQueues.initial(context))
+                   AbandonmentIndex(starts), DeliveryQueues.initial(context))
 
 class PushTransaction:
     def __init__(self, receiver):

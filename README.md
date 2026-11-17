@@ -23,7 +23,7 @@
     python3.11 -B -m telecapture.measurements.ingest --db /tmp/telecapture-example.sqlite import samples/normal.jsonl
     python3.11 -B -m telecapture.measurements.ingest --db /tmp/telecapture-example.sqlite read --stream 7 --start-us 100 --end-us 103
 
-verify.sh 执行完整 unittest discover 并传播退出码。demo.sh 在独立临时目录实际导入正常、缺片放弃样例，重放、查询、断言并重开核账，结束清理数据库。两份运行清单使用相同真实 argv。CLI 成功退出 0，错误向 stderr 输出 JSON error 并退出 2。数据库由用户指定，不清空其他录制。
+verify.sh 执行完整 unittest discover 与混合公开回归（mixed_check.py verify）并传播退出码。demo.sh 在独立临时目录实际导入正常、缺片放弃样例，重放、查询、断言并重开核账，随后导入混合样例展示无序交付、入仓、重放与重开结果，结束清理数据库。两份运行清单使用相同真实 argv。CLI 成功退出 0，错误向 stderr 输出 JSON error 并退出 2。数据库由用户指定，不清空其他录制。
 
 ## 公开 Python API
 
@@ -34,6 +34,16 @@ verify.sh 执行完整 unittest discover 并传播退出码。demo.sh 在独立�
 - telecapture.measurements.ingest.import_recording(path, archive) 返回含 events、delivered、inserted、incomplete 的 IngestReport。需要同进程存储失败重试时，保持 open_recording 上下文，创建 IngestRun(recording, archive) 并调用 run()；失败后 pending 保存原批次，retry_pending() 成功后再次 run() 继续。解码失败应修正原录制并新建运行，不得将坏批次冒充已提交。V1 不提供进程中断续采。
 
 DeliveredMessage 含录制、网关、会话、流、逻辑 MID、原始 MID、body 和 fragments。Fragment 保留 TSN、FSN、标记、字节及来源位置；归档保存原文、摘要和片段来源。来源路径、行号与运行时间不进入稳定身份。跨流 drain 按数字流号遍历，不声明跨流网络顺序。
+
+## 混合有序／无序模式
+
+同一录制可携带无序流量：流声明可加 uint32 initial_unordered_mid（缺省 0，显式 0 与省略相同，不改变头的规范串），I-DATA 与 I-FORWARD-TSN 条目可加布尔 unordered（缺省 false）。JSONL 读取器自动接受；离线 decode_event 需 mixed=True 才接受模式字段，缺省调用保持 V1 严格校验。状态归属与不变量：
+
+- TSN 接收账本为两种模式共享；相同 TSN 改变 unordered 即身份冲突。分片重组、逻辑 MID 展开锚点与放弃游标按模式隔离，同流同 MID 的两种正文互不混合、互不覆盖。
+- 无序消息完整即可 drain，不等待低 MID 或有序前驱；一次 drain 按流号、模式（有序在前）、逻辑 MID 排序。已 drain 身份永不重复交付；高 MID 先交付不关闭晚完成的低 MID；完整未 drain 仍可被同模式放弃终结。
+- 放弃项只终结指定流与模式从初始值至所指逻辑 MID 的未交付消息；不撤回已 drain 成果，迟到分片不能复活。旧通知不推进任一模式的放弃或展开锚点。失败 push 不改变任一模式或共享接收事实。
+- 交付键按模式命名空间隔离：有序键保持 V1 五元形式，无序键为独立稳定形式，仅由身份字段、模式与逻辑 MID 决定。归档按对应模式的初始 MID 核验逻辑身份与 raw_mid，两种模式分别保存、各自幂等；查询排序在流号之后按模式、逻辑 MID 递进。
+- finish_input 对有序未完整消息返回 (stream_id, logical_mid)，无序返回 (stream_id, logical_mid, true)，按流号、模式、逻辑 MID 排序。
 
 ## JSONL 输入
 
@@ -80,5 +90,6 @@ RecordingError 带源行号，区分坏输入和 EOF；AssociationError 拒绝�
 - tests/test_abandonment.py：逐 push 核对 A/C/放弃/迟到 B、未覆盖流、双序号回绕、重复及旧通知，与独立小域排列模型比较。
 - tests/test_replay.py：重放、独立身份、空录制、完整状态快照及冲突后续接。
 - tests/test_archive.py：坏批次无前缀、事务故障、重开、重试、初始化保留及损坏拒绝。
+- tests/test_mixed.py：混合模式独立小域排列参照、高 MID 先交付与低 MID 晚完成、两种空间各自回绕、旧／同位置通知、模式冲突原子性及混合批次失败重试。
 
 预期采用固定整数与独立模型，不用待验证函数生成。场景标记在真实断言后打印实测结果。相同头、录制顺序及初始归档产生确定性结果。

@@ -22,26 +22,47 @@ class CaptureReceiver:
         state = transaction.stage()
         try:
             if isinstance(event, IDataEvent):
-                logical_mid = unwrap32(event.mid, state.queues.next_mid[event.stream_id])
-                tsn, duplicate = state.ledger.inspect(event, logical_mid)
-                if not duplicate:
-                    if (logical_mid >= state.queues.next_mid[event.stream_id] and
-                            not state.abandonment.contains(event.stream_id, logical_mid)):
-                        state.messages.accept(event, logical_mid)
-                    state.ledger.record(event, tsn, logical_mid)
+                self._push_data(state, event)
             else:
-                plan = plan_forward(event, state.ledger, self.catalog, state.queues)
-                state.ledger.advance_cumulative(plan.cumulative)
-                state.ledger.forward_position = plan.forward_position
-                for stream, through in plan.abandonments:
-                    state.abandonment.apply(stream, through)
-                    state.messages.retire(stream, through)
+                self._push_forward(state, event)
             state.queues.refresh(state.messages, state.abandonment)
         except ValueError as exc:
             if isinstance(exc, CaptureConflict):
                 raise
             raise CaptureConflict(str(exc), event.evidence.location) from exc
         transaction.commit()
+
+    def _push_data(self, state, event):
+        if event.unordered:
+            anchor = state.queues.unordered_anchor[event.stream_id]
+        else:
+            anchor = state.queues.next_mid[event.stream_id]
+        logical_mid = unwrap32(event.mid, anchor)
+        tsn, duplicate = state.ledger.inspect(event, logical_mid)
+        if duplicate:
+            return
+        if event.unordered:
+            initial = self.catalog.require_stream(event.stream_id).initial_unordered_mid
+            if (initial <= logical_mid
+                    and not state.abandonment.contains(event.stream_id, logical_mid, True)
+                    and (event.stream_id, logical_mid) not in state.queues.unordered_delivered):
+                state.messages.accept(event, logical_mid)
+            state.queues.advance_unordered_anchor(event.stream_id, logical_mid)
+        else:
+            if (logical_mid >= state.queues.next_mid[event.stream_id] and
+                    not state.abandonment.contains(event.stream_id, logical_mid)):
+                state.messages.accept(event, logical_mid)
+        state.ledger.record(event, tsn, logical_mid)
+
+    def _push_forward(self, state, event):
+        plan = plan_forward(event, state.ledger, self.catalog, state.queues)
+        state.ledger.advance_cumulative(plan.cumulative)
+        state.ledger.forward_position = plan.forward_position
+        for stream, unordered, through in plan.abandonments:
+            state.abandonment.apply(stream, through, unordered)
+            state.messages.retire(stream, through, unordered)
+            if unordered:
+                state.queues.advance_unordered_anchor(stream, through)
 
     def snapshot(self):
         return deepcopy(self.state)

@@ -6,6 +6,7 @@ from telecapture.measurements.codec import decode_batch, storage_row
 from telecapture.measurements.query import read, verified_messages
 from telecapture.association.context import make_context
 from telecapture.association.registry import assert_same_registration
+from telecapture.recording.header import parse_header
 
 def registration_key(context):
     return json.dumps(list(context.registration_key), separators=(',', ':'))
@@ -76,10 +77,15 @@ class Archive:
                     'SELECT canonical_header FROM recordings WHERE registration_key=?', (context_key,)).fetchone()
                 if header_row is None:
                     raise ArchiveError('identity_conflict', 'recording must be registered first')
-                header = json.loads(header_row[0])
-                streams = {x['stream_id']: x['initial_mid'] for x in header['streams']}
-                if (message.stream_id not in streams or
-                    message.logical_mid < streams[message.stream_id] or
+                header = parse_header(json.loads(header_row[0]))
+                unordered_initials = dict(header.unordered_streams)
+                initials = {}
+                for stream, mid in header.streams:
+                    initials[(stream, False)] = mid
+                    initials[(stream, True)] = unordered_initials.get(stream, 0)
+                initial = initials.get((message.stream_id, message.unordered))
+                if (initial is None or
+                    message.logical_mid < initial or
                     message.raw_mid != message.logical_mid % 2**32):
                     raise ArchiveError('identity_conflict', 'delivery is outside registered stream')
                 previous = self.connection.execute(
@@ -120,7 +126,8 @@ class Archive:
         try:
             self._check()
             return [dict(delivery_key=x[0], recording_id=x[1], gateway_id=x[2], session_id=x[3],
-                         stream_id=x[4], logical_mid=x[5], raw_mid=x[6], body=x[7], provenance=x[8])
+                         stream_id=x[4], unordered=x[5], logical_mid=x[6], raw_mid=x[7],
+                         body=x[8], provenance=x[9])
                     for x in sorted(verified_messages(self.connection), key=lambda x: x[0])]
         except sqlite3.Error as exc:
             raise ArchiveError('storage', str(exc)) from exc

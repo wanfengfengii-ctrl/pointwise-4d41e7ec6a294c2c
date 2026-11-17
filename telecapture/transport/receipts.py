@@ -10,6 +10,7 @@ class CaptureConflict(ValueError):
 class Receipt:
     logical_tsn: int
     stream_id: int
+    unordered: bool
     logical_mid: int
     fsn: int
     signature: tuple
@@ -26,27 +27,30 @@ class ReceiptLedger:
     def initial(cls, cumulative):
         return cls(cumulative, cumulative)
 
+    @staticmethod
+    def signature(event, logical_mid):
+        return (event.session_id, event.stream_id, event.unordered, logical_mid,
+                event.fsn, event.begin, event.end, event.payload)
+
     def inspect(self, event, logical_mid):
         tsn = unwrap32(event.tsn, self.cumulative)
-        signature = (event.session_id, event.stream_id, logical_mid, event.fsn,
-                     event.begin, event.end, event.payload)
+        signature = self.signature(event, logical_mid)
         previous = self.receipts.get(tsn)
         if previous is not None:
             if previous.signature != signature:
                 raise CaptureConflict('TSN identity conflict', event.evidence.location)
             return tsn, True
-        fragment_key = (event.stream_id, logical_mid, event.fsn)
+        fragment_key = (event.stream_id, event.unordered, logical_mid, event.fsn)
         fragment_value = (event.begin, event.end, event.payload)
         if fragment_key in self.fragments and self.fragments[fragment_key] != fragment_value:
             raise CaptureConflict('fragment identity conflict', event.evidence.location)
         return tsn, False
 
     def record(self, event, logical_tsn, logical_mid):
-        signature = (event.session_id, event.stream_id, logical_mid, event.fsn,
-                     event.begin, event.end, event.payload)
-        self.receipts[logical_tsn] = Receipt(logical_tsn, event.stream_id, logical_mid,
-                                             event.fsn, signature, event.evidence)
-        self.fragments[(event.stream_id, logical_mid, event.fsn)] = (
+        self.receipts[logical_tsn] = Receipt(logical_tsn, event.stream_id, event.unordered,
+                                             logical_mid, event.fsn,
+                                             self.signature(event, logical_mid), event.evidence)
+        self.fragments[(event.stream_id, event.unordered, logical_mid, event.fsn)] = (
             event.begin, event.end, event.payload)
         self.advance_cumulative(self.cumulative)
 

@@ -39,4 +39,34 @@ with tempfile.TemporaryDirectory(prefix='telecapture-demo-') as directory:
             oracle='literal integer unit multipliers and independent evidence/MID count')))
     with Archive(database) as reopened:
         assert [(r.sensor_id, r.value_micro, r.quality) for r in reopened.read()] == expected
+    # Mixed ordered/unordered increment: one recording carries both modes.
+    with Archive(database) as archive:
+        mixed = import_recording('samples/mixed.jsonl', archive)
+        replay = import_recording('samples/mixed.jsonl', archive)
+        assert (mixed.events, mixed.delivered, mixed.inserted) == (7, 3, 3)
+        assert (replay.delivered, replay.inserted) == (3, 0)
+        mixed_rows = [r for r in archive.read() if r.recording_id == 'mixed-public']
+        mixed_actual = [(r.unordered, r.logical_mid, r.value_micro) for r in mixed_rows]
+        mixed_expected = [(True, 0, 10000), (True, 1, 11000), (True, 2, 12000)]
+        assert mixed_actual == mixed_expected, (mixed_expected, mixed_actual)
+        mixed_evidence = [e for e in archive.evidence() if e['recording_id'] == 'mixed-public']
+        assert len(mixed_evidence) == 3 and all(e['unordered'] for e in mixed_evidence)
+        print(json.dumps(dict(mixed=mixed.__dict__, mixed_replay=replay.__dict__,
+                              mixed_measurements=[r.as_dict() for r in mixed_rows]),
+                         sort_keys=True))
+        print('POINTWISE_SCENARIO ' + json.dumps(dict(
+            case_id='mixed.order_unordered_delivery',
+            input=dict(mixed='samples/mixed.jsonl'),
+            expected=mixed_expected, actual=mixed_actual,
+            downstream_expected=dict(evidence=3, replay_inserted=0, ordered_delivered=0),
+            downstream_actual=dict(evidence=len(mixed_evidence), replay_inserted=replay.inserted,
+                                   ordered_delivered=sum(1 for r in mixed_rows if not r.unordered)),
+            code_paths=['telecapture/recording/events.py','telecapture/transport/receiver.py',
+                        'telecapture/delivery/queues.py','telecapture/measurements/archive.py'],
+            oracle='literal per-event drain expectations from MIXED.md; 10/11/12 mC times 1000')))
+    with Archive(database) as reopened:
+        assert [(r.unordered, r.logical_mid, r.value_micro)
+                for r in reopened.read() if r.recording_id == 'mixed-public'] == mixed_expected
+        assert [(r.sensor_id, r.value_micro, r.quality)
+                for r in reopened.read() if r.recording_id != 'mixed-public'] == expected
 PY

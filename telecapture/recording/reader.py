@@ -51,7 +51,7 @@ class RecordingInput:
                 if raw is None:
                     return
                 evidence = make_evidence(self.path, self.line, raw)
-                yield decode_event(json_object(raw, self.location), evidence)
+                yield decode_event(json_object(raw, self.location), evidence, mixed=True)
         finally:
             self.close()
 
