@@ -1,0 +1,6 @@
+{"version":1,"recording_id":"loss-day","gateway_id":"gw-east","session_id":"session-a","initial_cumulative_tsn":99,"streams":[{"stream_id":7,"initial_mid":0},{"stream_id":8,"initial_mid":0}]}
+{"type":"I-DATA","session_id":"session-a","tsn":100,"stream_id":7,"mid":0,"fsn":0,"begin":true,"end":false,"payload_b64":"eyJ2ZXJzaW9uIjoxLCJtZWFzdXJlbWVudHMiOlt7InNlbnNvcg=="}
+{"type":"I-DATA","session_id":"session-a","tsn":102,"stream_id":7,"mid":1,"fsn":0,"begin":true,"end":true,"payload_b64":"eyJ2ZXJzaW9uIjoxLCJtZWFzdXJlbWVudHMiOlt7InNlbnNvcl9pZCI6InRoZXJtb21ldGVyIiwidGltZV91cyI6MTAzLCJxdWFudGl0eSI6InRlbXBlcmF0dXJlIiwidW5pdCI6Im1DIiwidmFsdWUiOjI1MDAwLCJxdWFsaXR5IjoiZ29vZCJ9XX0="}
+{"type":"I-FORWARD-TSN","session_id":"session-a","cumulative_tsn":102,"entries":[{"stream_id":7,"mid":0}]}
+{"type":"I-DATA","session_id":"session-a","tsn":101,"stream_id":7,"mid":0,"fsn":1,"begin":false,"end":true,"payload_b64":"X2lkIjoidW5yZWNlaXZlZCIsInRpbWVfdXMiOjk5LCJxdWFudGl0eSI6InRlbXBlcmF0dXJlIiwidW5pdCI6Im1DIiwidmFsdWUiOjk5OSwicXVhbGl0eSI6Imdvb2QifV19"}
+{"type":"I-DATA","session_id":"session-a","tsn":100,"stream_id":7,"mid":0,"fsn":0,"begin":true,"end":false,"payload_b64":"eyJ2ZXJzaW9uIjoxLCJtZWFzdXJlbWVudHMiOlt7InNlbnNvcg=="}
